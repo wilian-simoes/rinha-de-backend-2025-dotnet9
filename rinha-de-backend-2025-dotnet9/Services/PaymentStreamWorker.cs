@@ -35,25 +35,22 @@
 
                         // TODO: lógica de processamento
 
-                        using (var scope = _scopeFactory.CreateScope())
+                        using var scope = _scopeFactory.CreateScope();
+                        var paymentProcessorService = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
+                        var health = await paymentProcessorService.GetServiceHealthAsync();
+
+                        var request = new Models.PaymentProcessor.PaymentRequest()
                         {
-                            var paymentProcessorService = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
-                            var health = await paymentProcessorService.GetServiceHealthAsync();
+                            correlationId = payment.correlationId,
+                            amount = payment.amount,
+                            requestedAt = DateTime.UtcNow,
+                        };
 
-                            var request = new Models.PaymentProcessor.PaymentRequest()
-                            {
-                                correlationId = payment.correlationId,
-                                amount = payment.amount,
-                                requestedAt = DateTime.UtcNow,
-                            };
+                        // TODO: Criar método para decidir se usa default ou fallback
+                        var response = await paymentProcessorService.PostPaymentsAsync(request);
 
-                            // TODO: Criar método para decidir se usa default ou fallback
-                            var response = await paymentProcessorService.PostPaymentsAsync(request);
-
-                            await _summaryService.IncrementSummaryAsync("default", request.amount, request.requestedAt);
-                            _logger.LogInformation($"[Worker] {response} {request.correlationId} - R$ {request.amount}");
-                        }
-                        //
+                        await _summaryService.IncrementSummaryAsync("default", request.amount, request.requestedAt);
+                        _logger.LogInformation($"[Worker] {response} {request.correlationId} - R$ {request.amount}");
 
                         await _streamService.AcknowledgeAsync(messageId);
                     }

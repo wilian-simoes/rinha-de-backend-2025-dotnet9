@@ -42,6 +42,7 @@ builder.Services.AddHttpClient("payment-processor-fallback", client =>
 
 builder.Services.AddLogging();
 builder.Services.AddHostedService<PaymentStreamWorker>();
+builder.Services.AddHostedService<PaymentStreamWorkerRetry>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddScoped<PaymentProcessorService>();
