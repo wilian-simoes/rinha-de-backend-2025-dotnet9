@@ -5,12 +5,18 @@
         private readonly RedisStreamService _streamService;
         private readonly ILogger<PaymentStreamWorker> _logger;
         private readonly SummaryService _summaryService;
+        private readonly IServiceScopeFactory _scopeFactory;
 
-        public PaymentStreamWorker(RedisStreamService streamService, ILogger<PaymentStreamWorker> logger, SummaryService summaryService)
+        public PaymentStreamWorker(
+            RedisStreamService streamService,
+            ILogger<PaymentStreamWorker> logger,
+            SummaryService summaryService,
+            IServiceScopeFactory scopeFactory)
         {
             _streamService = streamService;
             _logger = logger;
             _summaryService = summaryService;
+            _scopeFactory = scopeFactory;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -29,9 +35,24 @@
 
                         // TODO: lógica de processamento
 
-                        await _summaryService.IncrementSummaryAsync("default", payment.amount, DateTime.UtcNow);
-                        _logger.LogInformation($"[Worker] Processado! pagamento {payment.correlationId} - R$ {payment.amount}");
+                        using (var scope = _scopeFactory.CreateScope())
+                        {
+                            var paymentProcessorService = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
+                            var health = await paymentProcessorService.GetServiceHealthAsync();
 
+                            var request = new Models.PaymentProcessor.PaymentRequest()
+                            {
+                                correlationId = payment.correlationId,
+                                amount = payment.amount,
+                                requestedAt = DateTime.UtcNow,
+                            };
+
+                            // TODO: Criar método para decidir se usa default ou fallback
+                            var response = await paymentProcessorService.PostPaymentsAsync(request);
+
+                            await _summaryService.IncrementSummaryAsync("default", request.amount, request.requestedAt);
+                            _logger.LogInformation($"[Worker] {response} {request.correlationId} - R$ {request.amount}");
+                        }
                         //
 
                         await _streamService.AcknowledgeAsync(messageId);

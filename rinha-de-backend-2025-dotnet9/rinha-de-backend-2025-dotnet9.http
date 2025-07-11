@@ -9,5 +9,5 @@ Content-Type: application/json
 }
 
 ### GetPaymentsSummary
-GET {{urlBase}}/payments-summary?from=2025-07-11T19:30:56.000Z&to=2025-07-11T19:35:56.000Z
+GET {{urlBase}}/payments-summary //?from=2025-07-11T19:30:56.000Z&to=2025-07-11T19:35:56.000Z
 Accept: application/json

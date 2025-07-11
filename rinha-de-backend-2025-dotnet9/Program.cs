@@ -40,6 +40,7 @@ builder.Services.AddHttpClient("payment-processor-fallback", client =>
     client.DefaultRequestHeaders.Add("Accept", "application/json");
 });
 
+builder.Services.AddLogging();
 builder.Services.AddHostedService<PaymentStreamWorker>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddSingleton<SummaryService>();
@@ -68,5 +69,5 @@ app.MapGet("/payments-summary", async (DateTime? from, DateTime? to, PaymentServ
     return Results.Ok(summary);
 })
 .WithName("payments-summary");
-
+    
 app.Run();

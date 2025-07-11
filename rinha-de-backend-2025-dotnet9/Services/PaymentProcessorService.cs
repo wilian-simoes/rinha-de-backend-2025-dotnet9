@@ -23,7 +23,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
             return _httpClientFactory.CreateClient("payment-processor-default");
         }
 
-        public async Task<string> Payments(PaymentRequest paymentRequest, bool useFallback = false)
+        public async Task<string> PostPaymentsAsync(PaymentRequest paymentRequest, bool useFallback = false)
         {
             var client = GetClient(useFallback);
             var response = await client.PostAsJsonAsync("/payments", paymentRequest);
@@ -37,6 +37,21 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
             _logger.LogInformation($"Pagamento processado com sucesso: {paymentRequest.correlationId}");
             return await response.Content.ReadAsStringAsync();
+        }
+
+        public async Task<ServiceHealthResponse> GetServiceHealthAsync(bool useFallback = false)
+        {
+            var client = GetClient(useFallback);
+            var response = await client.GetAsync("/payments/service-health");
+
+            if (!response.IsSuccessStatusCode)
+            {
+                var messageError = $"Erro ao verificar saúde do serviço de pagamento: {response.StatusCode}";
+                _logger.LogError(messageError);
+                throw new Exception(messageError);
+            }
+
+            return await response.Content.ReadFromJsonAsync<ServiceHealthResponse>();
         }
     }
 }
