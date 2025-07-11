@@ -28,9 +28,22 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
     return ConnectionMultiplexer.Connect(conn);
 });
 
+builder.Services.AddHttpClient("payment-processor-default", client =>
+{
+    client.BaseAddress = new Uri("http://localhost:8001");
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
+builder.Services.AddHttpClient("payment-processor-fallback", client =>
+{
+    client.BaseAddress = new Uri("http://localhost:8002");
+    client.DefaultRequestHeaders.Add("Accept", "application/json");
+});
+
 builder.Services.AddHostedService<PaymentStreamWorker>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddSingleton<SummaryService>();
+builder.Services.AddScoped<PaymentProcessorService>();
 
 var app = builder.Build();
 
@@ -49,7 +62,7 @@ app.MapPost("/payments", async (Payment payment, PaymentService paymentService) 
 })
 .WithName("payments");
 
-app.MapGet("/payments-summary", async (DateTime from, DateTime to, PaymentService paymentService) =>
+app.MapGet("/payments-summary", async (DateTime? from, DateTime? to, PaymentService paymentService) =>
 {
     var summary = await paymentService.GetPaymentsSummary(from, to);
     return Results.Ok(summary);

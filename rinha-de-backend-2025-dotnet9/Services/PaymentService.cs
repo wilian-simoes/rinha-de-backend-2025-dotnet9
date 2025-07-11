@@ -15,10 +15,9 @@ namespace rinha_de_backend_2025_dotnet9.Services
             _logger = logger;
         }
 
-        public async Task<PaymentSummary> GetPaymentsSummary(DateTime from, DateTime to)
+        public async Task<PaymentSummary> GetPaymentsSummary(DateTime? from, DateTime? to)
         {
-            // TODO: Lembrar de implementar lógica de filtragem por data
-            var summary = await _summaryService.GetFullSummaryAsync();
+            var summary = await _summaryService.GetFullSummaryAsync(from, to);
             return summary;
         }
 

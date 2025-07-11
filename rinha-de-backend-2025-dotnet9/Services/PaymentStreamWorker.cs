@@ -29,7 +29,7 @@
 
                         // TODO: lógica de processamento
 
-                        await _summaryService.IncrementSummaryAsync("default", payment.amount);
+                        await _summaryService.IncrementSummaryAsync("default", payment.amount, DateTime.UtcNow);
                         _logger.LogInformation($"[Worker] Processado! pagamento {payment.correlationId} - R$ {payment.amount}");
 
                         //

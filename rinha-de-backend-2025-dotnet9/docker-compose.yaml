@@ -14,3 +14,9 @@ services:
   #     - ASPNETCORE_ENVIRONMENT=Development
   #   ports:
   #     - "8080:8080"
+
+  # networks:
+  #   backend:
+  #     driver: bridge
+  #   payment-processor:
+  #     external: true
