@@ -39,7 +39,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
                     _logger.LogInformation($"[Worker] Processando pagamento {payment.correlationId} - R$ {payment.amount}");
 
-                    var response = await ProcessPayment(payment, messageId, useFallback: false);
+                    var response = await ProcessPayment(payment, messageId, validateHealth: false);
 
                     _logger.LogInformation($"[Worker] {response} {payment.correlationId} - R$ {payment.amount}");
                 }
@@ -53,7 +53,30 @@ namespace rinha_de_backend_2025_dotnet9.Services
             _logger.LogInformation("Worker de pagamentos encerrado.");
         }
 
-        private async Task<string> ProcessPayment(Payment payment, string messageId, bool useFallback = false)
+        public bool ChooseService(
+            (bool failing, int minResponseTime) healthDefault,
+            (bool failing, int minResponseTime) healthFallback,
+            int toleranciaMs = 10000)
+        {
+            if (!healthDefault.failing)
+            {
+                if (!healthFallback.failing &&
+                    (healthDefault.minResponseTime - healthFallback.minResponseTime) > toleranciaMs)
+                {
+                    return true; // fallback
+                }
+
+                return false; // default
+            }
+
+            if (!healthFallback.failing)
+                return true; // fallback
+
+            return healthDefault.minResponseTime <= healthFallback.minResponseTime ? false : true;
+        }
+
+
+        private async Task<string> ProcessPayment(Payment payment, string messageId, bool validateHealth = false)
         {
             var processor = ActivatorUtilities.CreateInstance<PaymentProcessorService>(_provider);
 
@@ -64,6 +87,24 @@ namespace rinha_de_backend_2025_dotnet9.Services
                 amount = payment.amount,
                 requestedAt = now,
             };
+
+            bool useFallback = false;
+
+            if (validateHealth)
+            {
+                try
+                {
+                    var healthPaymentsDefault = await processor.GetServiceHealthAsync(useFallback: false);
+                    var healthPaymentsFallback = await processor.GetServiceHealthAsync(useFallback: true);
+
+                    useFallback = ChooseService((healthPaymentsDefault.failing, healthPaymentsDefault.minResponseTime),
+                                                (healthPaymentsFallback.failing, healthPaymentsFallback.minResponseTime));
+                }
+                catch (Exception)
+                {
+                    useFallback = false;
+                }
+            }
 
             var response = await processor.PostPaymentsAsync(request, useFallback);
 
@@ -119,7 +160,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
                         _logger.LogInformation("[Retry] Reprocessando pagamento pendente {CorrelationId}", payment.correlationId);
 
-                        var response = await ProcessPayment(payment, msg.MessageId, useFallback: false);
+                        var response = await ProcessPayment(payment, msg.MessageId, validateHealth: true);
 
                         _logger.LogInformation("[Retry] Sucesso {CorrelationId} - R$ {Amount}", payment.correlationId, payment.amount);
                     }

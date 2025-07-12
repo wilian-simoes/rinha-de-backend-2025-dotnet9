@@ -32,12 +32,14 @@ builder.Services.AddHttpClient("payment-processor-default", client =>
 {
     client.BaseAddress = new Uri("http://localhost:8001");
     client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(10);
 });
 
 builder.Services.AddHttpClient("payment-processor-fallback", client =>
 {
     client.BaseAddress = new Uri("http://localhost:8002");
     client.DefaultRequestHeaders.Add("Accept", "application/json");
+    client.Timeout = TimeSpan.FromSeconds(2);
 });
 
 builder.Services.AddLogging();
