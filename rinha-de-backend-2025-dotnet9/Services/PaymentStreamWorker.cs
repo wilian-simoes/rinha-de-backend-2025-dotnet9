@@ -1,4 +1,8 @@
-﻿namespace rinha_de_backend_2025_dotnet9.Services
+﻿using rinha_de_backend_2025_dotnet9.Models;
+using StackExchange.Redis;
+using System.Text.Json;
+
+namespace rinha_de_backend_2025_dotnet9.Services
 {
     public class PaymentStreamWorker : BackgroundService
     {
@@ -22,6 +26,8 @@
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
+
+            var lastRetryCheck = DateTime.UtcNow;
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -58,6 +64,13 @@
                     {
                         await Task.Delay(500, stoppingToken);
                     }
+
+                    // RETRY A CADA 10 segundos
+                    if ((DateTime.UtcNow - lastRetryCheck).TotalSeconds >= 10)
+                    {
+                        await ReprocessarPendentesAsync(stoppingToken);
+                        lastRetryCheck = DateTime.UtcNow;
+                    }
                 }
                 catch (Exception ex)
                 {
@@ -67,6 +80,77 @@
             }
 
             _logger.LogInformation("Worker de pagamentos encerrado.");
+        }
+
+        private async Task ReprocessarPendentesAsync(CancellationToken stoppingToken)
+        {
+            const int minIdleTimeMs = 20000;
+            const int maxAttempts = 5;
+
+            var allPending = await _streamService.StreamPendingMessagesAsync(500);
+            var pendings = allPending.Where(x => x.IdleTimeInMilliseconds >= minIdleTimeMs).ToArray();
+
+            if (!pendings.Any())
+            {
+                await Task.Delay(5000, stoppingToken);
+                return;
+            }
+
+            foreach (var msg in pendings)
+            {
+                if (msg.IdleTimeInMilliseconds < minIdleTimeMs)
+                    continue;
+
+                if (msg.DeliveryCount > maxAttempts)
+                {
+                    _logger.LogWarning("[Retry] Mensagem {MessageId} falhou {DeliveryCount} vezes. A mensagem será descartada.",
+                                    msg.MessageId, msg.DeliveryCount);
+
+                    // TODO: se necessário, depois posso mover para uma DQL (fila morta, para análisar)
+
+                    await _streamService.AcknowledgeAsync(msg.MessageId);
+
+                    continue;
+                }
+
+                var claimed = await _streamService.StreamClaimAsync(minIdleTimeMs, msg.MessageId);
+
+                foreach (var entry in claimed)
+                {
+                    try
+                    {
+                        var json = entry.Values.First(x => x.Name == "data").Value;
+                        var payment = JsonSerializer.Deserialize<Payment>(json);
+
+                        if (payment is null)
+                            throw new Exception("Dados inválidos para retry");
+
+                        _logger.LogInformation("[Retry] Reprocessando pagamento pendente {CorrelationId}", payment.correlationId);
+
+                        using var scope = _scopeFactory.CreateScope();
+                        var processor = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
+
+                        var request = new Models.PaymentProcessor.PaymentRequest
+                        {
+                            correlationId = payment.correlationId,
+                            amount = payment.amount,
+                            requestedAt = DateTime.UtcNow
+                        };
+
+                        var response = await processor.PostPaymentsAsync(request);
+                        await _summaryService.IncrementSummaryAsync("default", request.amount, request.requestedAt);
+
+                        await _streamService.AcknowledgeAsync(msg.MessageId);
+
+                        _logger.LogInformation("[Retry] Sucesso {CorrelationId} - R$ {Amount}", request.correlationId, request.amount);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogError(ex, "[Retry] Falha ao reprocessar {MessageId}. Permanecerá pendente.", msg.MessageId);
+                        await Task.Delay(500, stoppingToken);
+                    }
+                }
+            }
         }
     }
 }

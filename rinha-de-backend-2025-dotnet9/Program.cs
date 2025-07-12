@@ -17,7 +17,7 @@ builder.Services.AddSingleton<RedisStreamService>(sp =>
     return new RedisStreamService(conn,
         streamKey: "payments-stream",
         consumerGroup: "payments-group",
-        consumerName: $"worker-{Guid.NewGuid()}");
+        consumerName: $"worker-{Environment.MachineName}");
 });
 
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
@@ -42,7 +42,6 @@ builder.Services.AddHttpClient("payment-processor-fallback", client =>
 
 builder.Services.AddLogging();
 builder.Services.AddHostedService<PaymentStreamWorker>();
-builder.Services.AddHostedService<PaymentStreamWorkerRetry>();
 builder.Services.AddScoped<PaymentService>();
 builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddScoped<PaymentProcessorService>();
