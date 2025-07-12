@@ -42,7 +42,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
             await _db.StreamAddAsync(_streamKey, entry);
         }
 
-        public async Task<(string messageId, Payment?)> ReadNextAsync(int timeoutMs = 5000)
+        public async Task<(string messageId, Payment?)> ReadNextAsync(int timeoutMs = 1000)
         {
             var entries = await _db.StreamReadGroupAsync(
                 _streamKey,

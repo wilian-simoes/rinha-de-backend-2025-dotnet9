@@ -1,5 +1,4 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
-using StackExchange.Redis;
 using System.Text.Json;
 
 namespace rinha_de_backend_2025_dotnet9.Services
@@ -9,68 +8,40 @@ namespace rinha_de_backend_2025_dotnet9.Services
         private readonly RedisStreamService _streamService;
         private readonly ILogger<PaymentStreamWorker> _logger;
         private readonly SummaryService _summaryService;
-        private readonly IServiceScopeFactory _scopeFactory;
+        private readonly IServiceProvider _provider;
 
         public PaymentStreamWorker(
             RedisStreamService streamService,
             ILogger<PaymentStreamWorker> logger,
             SummaryService summaryService,
-            IServiceScopeFactory scopeFactory)
+            IServiceProvider provider)
         {
             _streamService = streamService;
             _logger = logger;
             _summaryService = summaryService;
-            _scopeFactory = scopeFactory;
+            _provider = provider;
         }
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
 
-            var lastRetryCheck = DateTime.UtcNow;
+            _ = Task.Run(() => RetryLoopAsync(stoppingToken));
 
             while (!stoppingToken.IsCancellationRequested)
             {
                 try
                 {
-                    var (messageId, payment) = await _streamService.ReadNextAsync();
+                    var (messageId, payment) = await _streamService.ReadNextAsync(timeoutMs: 1000);
 
-                    if (payment != null)
-                    {
-                        _logger.LogInformation($"[Worker] Processando pagamento {payment.correlationId} - R$ {payment.amount}");
+                    if (payment is null)
+                        continue;
 
-                        // TODO: lógica de processamento
+                    _logger.LogInformation($"[Worker] Processando pagamento {payment.correlationId} - R$ {payment.amount}");
 
-                        using var scope = _scopeFactory.CreateScope();
-                        var paymentProcessorService = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
-                        var health = await paymentProcessorService.GetServiceHealthAsync();
+                    var response = await ProcessPayment(payment, messageId, useFallback: false);
 
-                        var request = new Models.PaymentProcessor.PaymentRequest()
-                        {
-                            correlationId = payment.correlationId,
-                            amount = payment.amount,
-                            requestedAt = DateTime.UtcNow,
-                        };
-
-                        // TODO: Criar método para decidir se usa default ou fallback
-                        var response = await paymentProcessorService.PostPaymentsAsync(request);
-
-                        await _summaryService.IncrementSummaryAsync("default", request.amount, request.requestedAt);
-                        _logger.LogInformation($"[Worker] {response} {request.correlationId} - R$ {request.amount}");
-
-                        await _streamService.AcknowledgeAsync(messageId);
-                    }
-                    else
-                    {
-                        await Task.Delay(500, stoppingToken);
-                    }
-
-                    // RETRY A CADA 5 segundos
-                    if ((DateTime.UtcNow - lastRetryCheck).TotalSeconds >= 5)
-                    {
-                        await ReprocessarPendentesAsync(stoppingToken);
-                        lastRetryCheck = DateTime.UtcNow;
-                    }
+                    _logger.LogInformation($"[Worker] {response} {payment.correlationId} - R$ {payment.amount}");
                 }
                 catch (Exception ex)
                 {
@@ -82,74 +53,90 @@ namespace rinha_de_backend_2025_dotnet9.Services
             _logger.LogInformation("Worker de pagamentos encerrado.");
         }
 
+        private async Task<string> ProcessPayment(Payment payment, string messageId, bool useFallback = false)
+        {
+            var processor = ActivatorUtilities.CreateInstance<PaymentProcessorService>(_provider);
+
+            var now = DateTime.UtcNow;
+            var request = new Models.PaymentProcessor.PaymentRequest
+            {
+                correlationId = payment.correlationId,
+                amount = payment.amount,
+                requestedAt = now,
+            };
+
+            var response = await processor.PostPaymentsAsync(request, useFallback);
+
+            await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request.amount, now);
+            await _streamService.AcknowledgeAsync(messageId);
+
+            return response;
+        }
+
+        private async Task RetryLoopAsync(CancellationToken stoppingToken)
+        {
+            while (!stoppingToken.IsCancellationRequested)
+            {
+                await ReprocessarPendentesAsync(stoppingToken);
+                await Task.Delay(5000, stoppingToken);
+            }
+        }
+
         private async Task ReprocessarPendentesAsync(CancellationToken stoppingToken)
         {
-            const int minIdleTimeMs = 60000;
-            const int maxAttempts = 5;
+            const int minIdleTimeMs = 5000;
+            const int maxAttempts = 3;
 
             var allPending = await _streamService.StreamPendingMessagesAsync(500);
+
             var pendings = allPending.Where(x => x.IdleTimeInMilliseconds >= minIdleTimeMs).ToArray();
 
-            if (!pendings.Any())
-            {
-                await Task.Delay(5000, stoppingToken);
+            if (pendings.Length == 0)
                 return;
-            }
 
-            foreach (var msg in pendings)
+            await Parallel.ForEachAsync(pendings, new ParallelOptions
             {
-                if (msg.IdleTimeInMilliseconds < minIdleTimeMs)
-                    continue;
-
-                if (msg.DeliveryCount > maxAttempts)
+                MaxDegreeOfParallelism = Environment.ProcessorCount,
+                CancellationToken = stoppingToken
+            },
+            async (msg, ct) =>
+            {
+                try
                 {
-                    _logger.LogWarning("[Retry] Mensagem {MessageId} falhou {DeliveryCount} vezes. A mensagem foi descartada.",
-                                    msg.MessageId, msg.DeliveryCount);
-
-                    // TODO: se necessário, depois posso mover para uma DQL (fila morta, para análisar)
-
-                    await _streamService.AcknowledgeAsync(msg.MessageId);
-
-                    continue;
-                }
-
-                var claimed = await _streamService.StreamClaimAsync(minIdleTimeMs, msg.MessageId);
-
-                foreach (var entry in claimed)
-                {
-                    try
+                    var claimed = await _streamService.StreamClaimAsync(minIdleTimeMs, msg.MessageId);
+                    foreach (var entry in claimed)
                     {
-                        var json = entry.Values.First(x => x.Name == "data").Value;
-                        var payment = JsonSerializer.Deserialize<Payment>(json);
+                        var json = entry.Values.FirstOrDefault(x => x.Name == "data").Value;
+                        if (!json.HasValue)
+                        {
+                            _logger.LogWarning("[Retry] Mensagem {MessageId} sem campo 'data'", msg.MessageId);
+                            return;
+                        }
 
+                        var payment = JsonSerializer.Deserialize<Payment>(json);
                         if (payment is null)
                             throw new Exception("Dados inválidos para retry");
 
                         _logger.LogInformation("[Retry] Reprocessando pagamento pendente {CorrelationId}", payment.correlationId);
 
-                        using var scope = _scopeFactory.CreateScope();
-                        var processor = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
+                        var response = await ProcessPayment(payment, msg.MessageId, useFallback: false);
 
-                        var request = new Models.PaymentProcessor.PaymentRequest
-                        {
-                            correlationId = payment.correlationId,
-                            amount = payment.amount,
-                            requestedAt = DateTime.UtcNow
-                        };
-
-                        var response = await processor.PostPaymentsAsync(request);
-                        await _summaryService.IncrementSummaryAsync("default", request.amount, request.requestedAt);
-
-                        await _streamService.AcknowledgeAsync(msg.MessageId);
-
-                        _logger.LogInformation("[Retry] Sucesso {CorrelationId} - R$ {Amount}", request.correlationId, request.amount);
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogError(ex, "[Retry] Falha ao reprocessar {MessageId}. Permanecerá pendente.", msg.MessageId);
+                        _logger.LogInformation("[Retry] Sucesso {CorrelationId} - R$ {Amount}", payment.correlationId, payment.amount);
                     }
                 }
-            }
+                catch (Exception ex)
+                {
+                    if (msg.DeliveryCount >= maxAttempts)
+                    {
+                        _logger.LogWarning("[Retry] Descartando mensagem {MessageId} após falhar {Count} tentativas", msg.MessageId, msg.DeliveryCount);
+                        await _streamService.AcknowledgeAsync(msg.MessageId);
+                    }
+                    else
+                    {
+                        _logger.LogError(ex, "[Retry] Falha ao reprocessar {MessageId}. Permanecerá pendente. Tentativas [{DeliveryCount}]", msg.MessageId, msg.DeliveryCount);
+                    }
+                }
+            });
         }
     }
 }
