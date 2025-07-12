@@ -78,7 +78,6 @@ namespace rinha_de_backend_2025_dotnet9.Services
             return await _db.StreamRangeAsync(_streamKey, messageId, messageId);
         }
 
-        // teste
         public async Task<StreamEntry[]> StreamClaimAsync(int minIdleTimeMs, RedisValue messageId)
         {
             return await _db.StreamClaimAsync(_streamKey, _consumerGroup, _consumerName, minIdleTimeMs, [messageId]);

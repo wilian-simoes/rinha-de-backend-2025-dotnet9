@@ -65,8 +65,8 @@ namespace rinha_de_backend_2025_dotnet9.Services
                         await Task.Delay(500, stoppingToken);
                     }
 
-                    // RETRY A CADA 10 segundos
-                    if ((DateTime.UtcNow - lastRetryCheck).TotalSeconds >= 10)
+                    // RETRY A CADA 5 segundos
+                    if ((DateTime.UtcNow - lastRetryCheck).TotalSeconds >= 5)
                     {
                         await ReprocessarPendentesAsync(stoppingToken);
                         lastRetryCheck = DateTime.UtcNow;
@@ -84,7 +84,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
         private async Task ReprocessarPendentesAsync(CancellationToken stoppingToken)
         {
-            const int minIdleTimeMs = 20000;
+            const int minIdleTimeMs = 60000;
             const int maxAttempts = 5;
 
             var allPending = await _streamService.StreamPendingMessagesAsync(500);
@@ -103,7 +103,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
                 if (msg.DeliveryCount > maxAttempts)
                 {
-                    _logger.LogWarning("[Retry] Mensagem {MessageId} falhou {DeliveryCount} vezes. A mensagem será descartada.",
+                    _logger.LogWarning("[Retry] Mensagem {MessageId} falhou {DeliveryCount} vezes. A mensagem foi descartada.",
                                     msg.MessageId, msg.DeliveryCount);
 
                     // TODO: se necessário, depois posso mover para uma DQL (fila morta, para análisar)
@@ -147,7 +147,6 @@ namespace rinha_de_backend_2025_dotnet9.Services
                     catch (Exception ex)
                     {
                         _logger.LogError(ex, "[Retry] Falha ao reprocessar {MessageId}. Permanecerá pendente.", msg.MessageId);
-                        await Task.Delay(500, stoppingToken);
                     }
                 }
             }
