@@ -1,6 +1,5 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
 using StackExchange.Redis;
-using System.Globalization;
 
 namespace rinha_de_backend_2025_dotnet9.Services
 {
@@ -22,6 +21,9 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
             await _db.HashIncrementAsync(redisKey, "totalRequests", 1);
             await _db.HashIncrementAsync(redisKey, "totalAmount", amountInCents);
+
+            // Adiciona ao índice
+            await _db.SetAddAsync($"summary:{summaryType}:index", timeKey);
         }
 
         public async Task<PaymentSummary> GetFullSummaryAsync(DateTime? from, DateTime? to)
@@ -29,48 +31,51 @@ namespace rinha_de_backend_2025_dotnet9.Services
             long defaultRequests = 0, defaultAmount = 0;
             long fallbackRequests = 0, fallbackAmount = 0;
 
-            if (from.HasValue && to.HasValue)
+            // Evita null
+            if (!from.HasValue || !to.HasValue)
+                return new PaymentSummary();
+
+            // Pega os índices salvos no Redis
+            var defaultIndex = await _db.SetMembersAsync("summary:default:index");
+            var fallbackIndex = await _db.SetMembersAsync("summary:fallback:index");
+
+            // Filtra apenas os timestamps dentro do intervalo
+            var filteredDefault = defaultIndex
+                .Select(x => x.ToString())
+                .Where(x =>
+                    DateTime.TryParseExact(x, "yyyy-MM-ddTHH:mm", null, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt) &&
+                    dt >= from && dt <= to)
+                .ToList();
+
+            var filteredFallback = fallbackIndex
+                .Select(x => x.ToString())
+                .Where(x =>
+                    DateTime.TryParseExact(x, "yyyy-MM-ddTHH:mm", null, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt) &&
+                    dt >= from && dt <= to)
+                .ToList();
+
+            // Faz leitura paralela
+            var defaultTasks = filteredDefault.Select(key => _db.HashGetAllAsync($"summary:default:{key}")).ToList();
+            var fallbackTasks = filteredFallback.Select(key => _db.HashGetAllAsync($"summary:fallback:{key}")).ToList();
+
+            var defaultResults = await Task.WhenAll(defaultTasks);
+            var fallbackResults = await Task.WhenAll(fallbackTasks);
+
+            foreach (var entries in defaultResults)
             {
-                var current = from.Value;
-                while (current <= to.Value)
+                foreach (var entry in entries)
                 {
-                    var keyTime = current.ToString("yyyy-MM-ddTHH:mm");
-
-                    var defaultData = (await _db.HashGetAllAsync($"summary:default:{keyTime}"))
-                        .ToDictionary(x => x.Name.ToString(), x => x.Value.ToString());
-
-                    var fallbackData = (await _db.HashGetAllAsync($"summary:fallback:{keyTime}"))
-                        .ToDictionary(x => x.Name.ToString(), x => x.Value.ToString());
-
-                    defaultRequests += long.Parse(defaultData.GetValueOrDefault("totalRequests") ?? "0");
-                    defaultAmount += long.Parse(defaultData.GetValueOrDefault("totalAmount") ?? "0");
-
-                    fallbackRequests += long.Parse(fallbackData.GetValueOrDefault("totalRequests") ?? "0");
-                    fallbackAmount += long.Parse(fallbackData.GetValueOrDefault("totalAmount") ?? "0");
-
-                    current = current.AddMinutes(1);
+                    if (entry.Name == "totalRequests") defaultRequests += (long)entry.Value;
+                    else if (entry.Name == "totalAmount") defaultAmount += (long)entry.Value;
                 }
             }
-            else
+
+            foreach (var entries in fallbackResults)
             {
-                var server = _db.Multiplexer.GetServer(_db.Multiplexer.GetEndPoints().First());
-
-                await foreach (var key in server.KeysAsync(pattern: "summary:default:*"))
+                foreach (var entry in entries)
                 {
-                    var data = await _db.HashGetAllAsync(key);
-                    var dict = data.ToDictionary(x => x.Name.ToString(), x => x.Value.ToString());
-
-                    defaultRequests += long.Parse(dict.GetValueOrDefault("totalRequests") ?? "0");
-                    defaultAmount += long.Parse(dict.GetValueOrDefault("totalAmount") ?? "0");
-                }
-
-                await foreach (var key in server.KeysAsync(pattern: "summary:fallback:*"))
-                {
-                    var data = await _db.HashGetAllAsync(key);
-                    var dict = data.ToDictionary(x => x.Name.ToString(), x => x.Value.ToString());
-
-                    fallbackRequests += long.Parse(dict.GetValueOrDefault("totalRequests") ?? "0");
-                    fallbackAmount += long.Parse(dict.GetValueOrDefault("totalAmount") ?? "0");
+                    if (entry.Name == "totalRequests") fallbackRequests += (long)entry.Value;
+                    else if (entry.Name == "totalAmount") fallbackAmount += (long)entry.Value;
                 }
             }
 

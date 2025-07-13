@@ -30,16 +30,14 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 
 builder.Services.AddHttpClient("payment-processor-default", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:8001");
-    client.DefaultRequestHeaders.Add("Accept", "application/json");
-    client.Timeout = TimeSpan.FromSeconds(10);
+    //client.BaseAddress = new Uri("http://localhost:8081");
+    client.BaseAddress = new Uri("http://payment-processor-default:8080");
 });
 
 builder.Services.AddHttpClient("payment-processor-fallback", client =>
 {
-    client.BaseAddress = new Uri("http://localhost:8002");
-    client.DefaultRequestHeaders.Add("Accept", "application/json");
-    client.Timeout = TimeSpan.FromSeconds(2);
+    //client.BaseAddress = new Uri("http://localhost:8082");
+    client.BaseAddress = new Uri("http://payment-processor-fallback:8080");
 });
 
 builder.Services.AddLogging();

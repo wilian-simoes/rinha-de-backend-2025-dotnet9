@@ -42,25 +42,15 @@ namespace rinha_de_backend_2025_dotnet9.Services
             await _db.StreamAddAsync(_streamKey, entry);
         }
 
-        public async Task<(string messageId, Payment?)> ReadNextAsync(int timeoutMs = 1000)
+        public async Task<StreamEntry[]> ReadNextAsync(int count)
         {
-            var entries = await _db.StreamReadGroupAsync(
+            return await _db.StreamReadGroupAsync(
                 _streamKey,
                 _consumerGroup,
                 _consumerName,
-                count: 1,
-                noAck: false,
-                position: ">"
+                StreamPosition.NewMessages,
+                count: count
             );
-
-            if (entries.Length == 0)
-                return (string.Empty, null);
-
-            var message = entries[0];
-            var json = message["data"];
-            var payment = JsonSerializer.Deserialize<Payment>(json);
-
-            return (message.Id, payment);
         }
 
         public async Task AcknowledgeAsync(string messageId)
