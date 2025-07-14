@@ -1,4 +1,5 @@
-﻿using rinha_de_backend_2025_dotnet9.Models;
+﻿using Microsoft.AspNetCore.DataProtection.KeyManagement;
+using rinha_de_backend_2025_dotnet9.Models;
 using StackExchange.Redis;
 using System.Text.Json;
 
@@ -71,6 +72,16 @@ namespace rinha_de_backend_2025_dotnet9.Services
         public async Task<StreamEntry[]> StreamClaimAsync(int minIdleTimeMs, RedisValue messageId)
         {
             return await _db.StreamClaimAsync(_streamKey, _consumerGroup, _consumerName, minIdleTimeMs, [messageId]);
+        }
+
+        public async Task<RedisValue> StringGetAsync(string key)
+        {
+            return await _db.StringGetAsync(key);
+        }
+
+        public async Task StringSetAsync(string key, RedisValue value)
+        {
+            await _db.StringSetAsync(key, value);
         }
     }
 }
