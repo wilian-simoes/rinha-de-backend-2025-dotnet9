@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Mvc;
 using rinha_de_backend_2025_dotnet9.Models;
 using rinha_de_backend_2025_dotnet9.Services;
 using StackExchange.Redis;

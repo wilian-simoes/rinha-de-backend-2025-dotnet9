@@ -28,8 +28,8 @@ namespace rinha_de_backend_2025_dotnet9.Services
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
 
-            const int batchSize = 10;
-            const int maxConcurrency = 20;
+            const int batchSize = 2;//2;
+            const int maxConcurrency = 5;//5;
 
             var concurrencyLimiter = new SemaphoreSlim(maxConcurrency);
             var tasks = new List<Task>();
@@ -38,7 +38,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
             {
                 try
                 {
-                    var now = DateTime.UtcNow;
+                    var now = DateTime.UtcNow.AddHours(-3);
                     _validateHealth = (now - _lastValidateHealth).TotalSeconds >= 5;
                     if (_validateHealth) _lastValidateHealth = now;
 

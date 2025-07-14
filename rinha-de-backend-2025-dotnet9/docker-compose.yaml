@@ -13,11 +13,11 @@ services:
     networks:
       - backend
       - payment-processor
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: "0.15"
-    #       memory: "15MB"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.10"
+          memory: "20MB"
 
   api1: &api
     build:
@@ -38,11 +38,11 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    # deploy:
-    #   resources:
-    #     limits:
-    #       cpus: "0.55"
-    #       memory: "30MB"
+    deploy:
+      resources:
+        limits:
+          cpus: "0.60"
+          memory: "130MB"
 
   api2:
     <<: *api
@@ -54,6 +54,12 @@ services:
       - PROCESSOR_FALLBACK_URL=http://payment-processor-fallback:8080
       - INSTANCE_ID=API-2
       - WORKER_CONCURRENCY=16
+    deploy:
+      resources:
+        limits:
+          cpus: "0.60"
+          memory: "130MB"
+
   redis:
     image: redis:latest
     restart: unless-stopped
@@ -67,6 +73,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.20"
+          memory: "70MB"
 
 networks:
   backend:
