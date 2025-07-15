@@ -16,14 +16,15 @@ namespace rinha_de_backend_2025_dotnet9.Services
         {
             var timeKey = processingDate.ToString("yyyy-MM-ddTHH:mm");
             var redisKey = $"summary:{summaryType}:{timeKey}";
+            var indexKey = $"summary:{summaryType}:index";
 
             long amountInCents = (long)(amount * 100);
 
-            await _db.HashIncrementAsync(redisKey, "totalRequests", 1);
-            await _db.HashIncrementAsync(redisKey, "totalAmount", amountInCents);
-
-            // Adiciona ao índice
-            await _db.SetAddAsync($"summary:{summaryType}:index", timeKey);
+            var tran = _db.CreateTransaction();
+            _ = tran.HashIncrementAsync(redisKey, "totalRequests", 1);
+            _ = tran.HashIncrementAsync(redisKey, "totalAmount", amountInCents);
+            _ = tran.SetAddAsync(indexKey, timeKey);
+            await tran.ExecuteAsync();
         }
 
         public async Task<PaymentSummary> GetFullSummaryAsync(DateTime? from, DateTime? to)
