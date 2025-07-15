@@ -32,6 +32,10 @@ namespace rinha_de_backend_2025_dotnet9.Services
             long defaultRequests = 0, defaultAmount = 0;
             long fallbackRequests = 0, fallbackAmount = 0;
 
+            // Define valores padrão caso não receba parâmetros
+            from = from ?? DateTime.MinValue;
+            to = to ?? DateTime.MaxValue;
+
             // Evita null
             if (!from.HasValue || !to.HasValue)
                 return new PaymentSummary();

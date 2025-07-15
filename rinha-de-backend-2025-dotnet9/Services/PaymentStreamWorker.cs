@@ -77,8 +77,8 @@ namespace rinha_de_backend_2025_dotnet9.Services
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
 
-            const int batchSize = 20;
-            const int maxConcurrency = 40;
+            const int batchSize = 10;
+            const int maxConcurrency = 20;
 
             var concurrencyLimiter = new SemaphoreSlim(maxConcurrency);
             var tasks = new List<Task>();
@@ -140,7 +140,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
         public bool ChooseService(
             (bool failing, int minResponseTime) healthDefault,
             (bool failing, int minResponseTime) healthFallback,
-            int toleranciaMs = 1)
+            int toleranciaMs = 10)
         {
             if (!healthDefault.failing)
             {
@@ -173,9 +173,10 @@ namespace rinha_de_backend_2025_dotnet9.Services
                 requestedAt = now,
             };
 
+            await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request.amount, now);
+
             var response = await processor.PostPaymentsAsync(request, useFallback);
 
-            await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request.amount, now);
             await _streamService.AcknowledgeAsync(messageId);
 
             return response;
