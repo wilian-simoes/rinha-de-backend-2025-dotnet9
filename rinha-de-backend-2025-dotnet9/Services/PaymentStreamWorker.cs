@@ -1,4 +1,5 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
+using System.Diagnostics;
 using System.Text.Json;
 
 namespace rinha_de_backend_2025_dotnet9.Services
@@ -38,6 +39,40 @@ namespace rinha_de_backend_2025_dotnet9.Services
             return true;
         }
 
+        public async Task<bool> UseFallback(bool validateHealth)
+        {
+            bool useFallback = false;
+
+            var useFallbackCache = await _streamService.StringGetAsync("health:useFallback");
+            if (useFallbackCache.HasValue && bool.TryParse(useFallbackCache, out var fb))
+            {
+                useFallback = fb;
+            }
+
+            if (validateHealth)
+            {
+                try
+                {
+                    using var scope = _scopeFactory.CreateScope();
+                    var processor = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
+
+                    var healthPaymentsDefault = await processor.GetServiceHealthAsync(useFallback: false);
+                    var healthPaymentsFallback = await processor.GetServiceHealthAsync(useFallback: true);
+
+                    useFallback = ChooseService((healthPaymentsDefault.failing, healthPaymentsDefault.minResponseTime),
+                                                (healthPaymentsFallback.failing, healthPaymentsFallback.minResponseTime));
+
+                    await _streamService.StringSetAsync("health:useFallback", useFallback);
+                }
+                catch (Exception)
+                {
+                    useFallback = false;
+                }
+            }
+
+            return useFallback;
+        }
+
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
@@ -72,12 +107,9 @@ namespace rinha_de_backend_2025_dotnet9.Services
                                 if (payment == null)
                                     return;
 
-                                _logger.LogInformation($"[Worker] Processando {payment.correlationId} - R$ {payment.amount}");
-
                                 var validateHealth = await ValidateHealthAsync();
-                                var response = await ProcessPayment(payment, entry.Id, validateHealth: validateHealth);
-
-                                _logger.LogInformation($"[Worker] {response} {payment.correlationId} - R$ {payment.amount}");
+                                var useFallback = await UseFallback(validateHealth);
+                                var response = await ProcessPayment(payment, entry.Id, useFallback: useFallback);
                             }
                             catch (Exception ex)
                             {
@@ -128,7 +160,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
         }
 
 
-        private async Task<string> ProcessPayment(Payment payment, string messageId, bool validateHealth = false)
+        private async Task<string> ProcessPayment(Payment payment, string messageId, bool useFallback)
         {
             using var scope = _scopeFactory.CreateScope();
             var processor = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
@@ -140,32 +172,6 @@ namespace rinha_de_backend_2025_dotnet9.Services
                 amount = payment.amount,
                 requestedAt = now,
             };
-
-            bool useFallback = false;
-
-            var useFallbackCache = await _streamService.StringGetAsync("health:useFallback");
-            if (useFallbackCache.HasValue && bool.TryParse(useFallbackCache, out var fb))
-            {
-                useFallback = fb;
-            }
-
-            if (validateHealth)
-            {
-                try
-                {
-                    var healthPaymentsDefault = await processor.GetServiceHealthAsync(useFallback: false);
-                    var healthPaymentsFallback = await processor.GetServiceHealthAsync(useFallback: true);
-
-                    useFallback = ChooseService((healthPaymentsDefault.failing, healthPaymentsDefault.minResponseTime),
-                                                (healthPaymentsFallback.failing, healthPaymentsFallback.minResponseTime));
-
-                    await _streamService.StringSetAsync("health:useFallback", useFallback);
-                }
-                catch (Exception)
-                {
-                    useFallback = false;
-                }
-            }
 
             var response = await processor.PostPaymentsAsync(request, useFallback);
 
