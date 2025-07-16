@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Mvc;
 using rinha_de_backend_2025_dotnet9.Models;
 using rinha_de_backend_2025_dotnet9.Services;
 using StackExchange.Redis;
@@ -44,7 +43,7 @@ builder.Services.AddHttpClient("payment-processor-fallback", client =>
 builder.Services.AddLogging();
 builder.Services.AddHostedService<PaymentStreamWorker>();
 builder.Services.AddScoped<PaymentService>();
-builder.Services.AddSingleton<SummaryService>();
+builder.Services.AddScoped<SummaryService>();
 builder.Services.AddScoped<PaymentProcessorService>();
 
 var app = builder.Build();

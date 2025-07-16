@@ -14,11 +14,11 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
         public async Task IncrementSummaryAsync(string summaryType, decimal amount, DateTime processingDate)
         {
-            var timeKey = processingDate.ToString("yyyy-MM-ddTHH:mm");
+            var timeKey = processingDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm");
             var redisKey = $"summary:{summaryType}:{timeKey}";
             var indexKey = $"summary:{summaryType}:index";
 
-            long amountInCents = (long)(amount * 100);
+            long amountInCents = (long)Math.Round(amount * 100);
 
             var tran = _db.CreateTransaction();
             _ = tran.HashIncrementAsync(redisKey, "totalRequests", 1);
@@ -49,14 +49,14 @@ namespace rinha_de_backend_2025_dotnet9.Services
                 .Select(x => x.ToString())
                 .Where(x =>
                     DateTime.TryParseExact(x, "yyyy-MM-ddTHH:mm", null, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt) &&
-                    dt >= from && dt <= to)
+                    dt >= from.Value.ToUniversalTime() && dt <= to.Value.ToUniversalTime())
                 .ToList();
 
             var filteredFallback = fallbackIndex
                 .Select(x => x.ToString())
                 .Where(x =>
                     DateTime.TryParseExact(x, "yyyy-MM-ddTHH:mm", null, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt) &&
-                    dt >= from && dt <= to)
+                    dt >= from.Value.ToUniversalTime() && dt <= to.Value.ToUniversalTime())
                 .ToList();
 
             // Faz leitura paralela

@@ -174,7 +174,6 @@ namespace rinha_de_backend_2025_dotnet9.Services
             };
 
             await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request.amount, now);
-
             var response = await processor.PostPaymentsAsync(request, useFallback);
 
             await _streamService.AcknowledgeAsync(messageId);
