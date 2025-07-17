@@ -1,23 +1,23 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
-using System.Diagnostics;
+using StackExchange.Redis;
 using System.Text.Json;
 
 namespace rinha_de_backend_2025_dotnet9.Services
 {
     public class PaymentStreamWorker : BackgroundService
     {
-        private readonly RedisStreamService _streamService;
+        private readonly IDatabase _redis;
         private readonly ILogger<PaymentStreamWorker> _logger;
         private readonly SummaryService _summaryService;
         private readonly IServiceScopeFactory _scopeFactory;
 
         public PaymentStreamWorker(
-            RedisStreamService streamService,
+            IConnectionMultiplexer connectionMultiplexer,
             ILogger<PaymentStreamWorker> logger,
             SummaryService summaryService,
             IServiceScopeFactory scopeFactory)
         {
-            _streamService = streamService;
+            _redis = connectionMultiplexer.GetDatabase();
             _logger = logger;
             _summaryService = summaryService;
             _scopeFactory = scopeFactory;
@@ -28,14 +28,14 @@ namespace rinha_de_backend_2025_dotnet9.Services
             var key = "health:last-check";
             var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
 
-            var lastCheck = await _streamService.StringGetAsync(key);
+            var lastCheck = await _redis.StringGetAsync(key);
             if (lastCheck.HasValue && long.TryParse(lastCheck, out var ts))
             {
                 if (now - ts < 5)
                     return false;
             }
 
-            await _streamService.StringSetAsync(key, now);
+            await _redis.StringSetAsync(key, now);
             return true;
         }
 
@@ -43,7 +43,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
         {
             bool useFallback = false;
 
-            var useFallbackCache = await _streamService.StringGetAsync("health:useFallback");
+            var useFallbackCache = await _redis.StringGetAsync("health:useFallback");
             if (useFallbackCache.HasValue && bool.TryParse(useFallbackCache, out var fb))
             {
                 useFallback = fb;
@@ -62,7 +62,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
                     useFallback = ChooseService((healthPaymentsDefault.failing, healthPaymentsDefault.minResponseTime),
                                                 (healthPaymentsFallback.failing, healthPaymentsFallback.minResponseTime));
 
-                    await _streamService.StringSetAsync("health:useFallback", useFallback);
+                    await _redis.StringSetAsync("health:useFallback", useFallback);
                 }
                 catch (Exception)
                 {
@@ -87,44 +87,56 @@ namespace rinha_de_backend_2025_dotnet9.Services
             {
                 try
                 {
-                    var entries = await _streamService.ReadNextAsync(batchSize);
+                    var entries = await _redis.ListLeftPopAsync("payments:queue", batchSize);
 
-                    if (entries.Length == 0)
+                    if (entries == null || entries.Length == 0)
                     {
                         await Task.Delay(50, stoppingToken);
                         continue;
                     }
 
-                    foreach (var entry in entries)
+                    var validEntries = Array.FindAll(entries, p => !p.IsNullOrEmpty);
+                    if (validEntries.Length > 0)
                     {
-                        await concurrencyLimiter.WaitAsync(stoppingToken);
+                        var failedPaymentsToRequeue = new List<RedisValue>();
 
-                        var task = Task.Run(async () =>
+                        foreach (var payload in validEntries)
                         {
-                            try
-                            {
-                                var payment = JsonSerializer.Deserialize<Payment>(entry["data"]);
-                                if (payment == null)
-                                    return;
+                            await concurrencyLimiter.WaitAsync(stoppingToken);
 
-                                var validateHealth = await ValidateHealthAsync();
-                                var useFallback = await UseFallback(validateHealth);
-                                var response = await ProcessPayment(payment, entry.Id, useFallback: useFallback);
-                            }
-                            catch (Exception ex)
+                            var task = Task.Run(async () =>
                             {
-                                _logger.LogError(ex, $"Erro ao processar mensagem {entry.Id}");
-                            }
-                            finally
-                            {
-                                concurrencyLimiter.Release();
-                            }
-                        }, stoppingToken);
+                                try
+                                {
+                                    var payment = JsonSerializer.Deserialize<Payment>(payload);
+                                    if (payment == null)
+                                        return;
 
-                        tasks.Add(task);
+                                    var validateHealth = await ValidateHealthAsync();
+                                    var useFallback = await UseFallback(validateHealth);
+                                    var response = await ProcessPayment(payment, useFallback: useFallback);
+                                }
+                                catch (Exception ex)
+                                {
+                                    _logger.LogError(ex, $"Falha. adicionando na fila para reprocessar.");
+                                    failedPaymentsToRequeue.Add(payload);
+                                }
+                                finally
+                                {
+                                    concurrencyLimiter.Release();
+                                }
+                            }, stoppingToken);
+
+                            tasks.Add(task);
+
+                            if (failedPaymentsToRequeue.Count > 0)
+                            {
+                                await _redis.ListRightPushAsync("payments:queue", failedPaymentsToRequeue.ToArray());
+                            }
+                        }
+
+                        tasks.RemoveAll(t => t.IsCompleted);
                     }
-
-                    tasks.RemoveAll(t => t.IsCompleted);
                 }
                 catch (Exception ex)
                 {
@@ -160,7 +172,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
         }
 
 
-        private async Task<string> ProcessPayment(Payment payment, string messageId, bool useFallback)
+        private async Task<string> ProcessPayment(Payment payment, bool useFallback)
         {
             using var scope = _scopeFactory.CreateScope();
             var processor = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
@@ -174,9 +186,8 @@ namespace rinha_de_backend_2025_dotnet9.Services
             };
 
             await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request.amount, now);
-            var response = await processor.PostPaymentsAsync(request, useFallback);
 
-            await _streamService.AcknowledgeAsync(messageId);
+            var response = await processor.PostPaymentsAsync(request, useFallback);
 
             return response;
         }

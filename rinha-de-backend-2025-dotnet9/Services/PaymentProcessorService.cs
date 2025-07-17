@@ -28,7 +28,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
             var client = GetClient(useFallback);
             var response = await client.PostAsJsonAsync("/payments", paymentRequest);
 
-            if(!response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
                 var messageError = $"Erro ao processar pagamento {paymentRequest.correlationId}: {response.StatusCode}";
                 _logger.LogError(messageError);

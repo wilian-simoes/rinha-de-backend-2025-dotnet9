@@ -1,16 +1,18 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
+using StackExchange.Redis;
+using System.Text.Json;
 
 namespace rinha_de_backend_2025_dotnet9.Services
 {
     public class PaymentService
     {
-        private readonly RedisStreamService _streamService;
+        private readonly IDatabase _redis;
         private readonly SummaryService _summaryService;
         private readonly ILogger<PaymentService> _logger;
 
-        public PaymentService(RedisStreamService streamService, SummaryService summaryService, ILogger<PaymentService> logger)
+        public PaymentService(IConnectionMultiplexer connectionMultiplexer, SummaryService summaryService, ILogger<PaymentService> logger)
         {
-            _streamService = streamService;
+            _redis = connectionMultiplexer.GetDatabase();
             _summaryService = summaryService;
             _logger = logger;
         }
@@ -25,7 +27,10 @@ namespace rinha_de_backend_2025_dotnet9.Services
         {
             try
             {
-                await _streamService.EnqueueAsync(payment);
+                var json = JsonSerializer.Serialize(payment);
+
+                await _redis.ListRightPushAsync("payments:queue", json, flags: CommandFlags.FireAndForget);
+
                 var message = $"Pagamento {payment.correlationId} adicionado na fila.";
                 _logger.LogInformation(message);
                 return message;

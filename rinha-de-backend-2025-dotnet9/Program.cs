@@ -8,18 +8,6 @@ var builder = WebApplication.CreateBuilder(args);
 // Learn more about configuring OpenAPI at https://aka.ms/aspnet/openapi
 builder.Services.AddOpenApi();
 
-// Configurar Redis Stream
-builder.Services.AddSingleton<RedisStreamService>(sp =>
-{
-    var config = sp.GetRequiredService<IConfiguration>();
-    var conn = config["Redis:ConnectionString"] ?? "redis:6379";
-
-    return new RedisStreamService(conn,
-        streamKey: "payments-stream",
-        consumerGroup: "payments-group",
-        consumerName: $"worker-{Environment.MachineName}");
-});
-
 builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 {
     var config = sp.GetRequiredService<IConfiguration>();
@@ -30,20 +18,20 @@ builder.Services.AddSingleton<IConnectionMultiplexer>(sp =>
 
 builder.Services.AddHttpClient("payment-processor-default", client =>
 {
-    //client.BaseAddress = new Uri("http://localhost:8081");
+    //client.BaseAddress = new Uri("http://localhost:8001");
     client.BaseAddress = new Uri("http://payment-processor-default:8080");
 });
 
 builder.Services.AddHttpClient("payment-processor-fallback", client =>
 {
-    //client.BaseAddress = new Uri("http://localhost:8082");
+    //client.BaseAddress = new Uri("http://localhost:8002");
     client.BaseAddress = new Uri("http://payment-processor-fallback:8080");
 });
 
 builder.Services.AddLogging();
 builder.Services.AddHostedService<PaymentStreamWorker>();
 builder.Services.AddScoped<PaymentService>();
-builder.Services.AddScoped<SummaryService>();
+builder.Services.AddSingleton<SummaryService>();
 builder.Services.AddScoped<PaymentProcessorService>();
 
 var app = builder.Build();
