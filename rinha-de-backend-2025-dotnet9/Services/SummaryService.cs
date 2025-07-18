@@ -12,18 +12,26 @@ namespace rinha_de_backend_2025_dotnet9.Services
             _db = redis.GetDatabase();
         }
 
-        public async Task IncrementSummaryAsync(string summaryType, decimal amount, DateTime processingDate)
+        public async Task IncrementSummaryAsync(string summaryType, decimal amount, DateTime processingDate, string correlationId)
         {
             var timeKey = processingDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm");
             var redisKey = $"summary:{summaryType}:{timeKey}";
             var indexKey = $"summary:{summaryType}:index";
+            var correlationSetKey = $"summary:{summaryType}:correlationIds";
 
-            long amountInCents = (long)Math.Round(amount * 100);
+            bool alreadyProcessed = await _db.SetContainsAsync(correlationSetKey, correlationId);
+            if (alreadyProcessed)
+            {
+                return;
+            }
+
+            long amountInCents = (long)Math.Round(amount * 100, 2);
 
             var tran = _db.CreateTransaction();
             _ = tran.HashIncrementAsync(redisKey, "totalRequests", 1);
             _ = tran.HashIncrementAsync(redisKey, "totalAmount", amountInCents);
             _ = tran.SetAddAsync(indexKey, timeKey);
+            _ = tran.SetAddAsync(correlationSetKey, correlationId);
             await tran.ExecuteAsync();
         }
 
@@ -89,12 +97,12 @@ namespace rinha_de_backend_2025_dotnet9.Services
                 _default = new Models.Shared.Summary
                 {
                     totalRequests = defaultRequests,
-                    totalAmount = defaultAmount / 100m
+                    totalAmount = Math.Round(defaultAmount / 100m, 2)
                 },
                 fallback = new Models.Shared.Summary
                 {
                     totalRequests = fallbackRequests,
-                    totalAmount = fallbackAmount / 100m
+                    totalAmount = Math.Round(fallbackAmount / 100m, 2)
                 }
             };
         }

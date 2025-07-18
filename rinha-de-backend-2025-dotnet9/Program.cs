@@ -20,12 +20,14 @@ builder.Services.AddHttpClient("payment-processor-default", client =>
 {
     //client.BaseAddress = new Uri("http://localhost:8001");
     client.BaseAddress = new Uri("http://payment-processor-default:8080");
+    client.Timeout = TimeSpan.FromMilliseconds(5);
 });
 
 builder.Services.AddHttpClient("payment-processor-fallback", client =>
 {
     //client.BaseAddress = new Uri("http://localhost:8002");
     client.BaseAddress = new Uri("http://payment-processor-fallback:8080");
+    client.Timeout = TimeSpan.FromMilliseconds(5);
 });
 
 builder.Services.AddLogging();
