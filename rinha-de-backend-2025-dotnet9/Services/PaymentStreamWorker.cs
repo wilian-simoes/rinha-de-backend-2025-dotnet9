@@ -27,7 +27,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
 
-            const int batchSize = 10;
+            const int batchSize = 15;
             const int maxConcurrency = 8;
 
             var concurrencyLimiter = new SemaphoreSlim(maxConcurrency);
