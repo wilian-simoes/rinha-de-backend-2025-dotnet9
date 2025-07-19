@@ -44,13 +44,19 @@ namespace rinha_de_backend_2025_dotnet9.Services
         public async Task<ServiceHealthResponse> GetServiceHealthAsync(bool useFallback = false)
         {
             var client = GetClient(useFallback);
+            client.Timeout = TimeSpan.FromSeconds(5);
             var response = await client.GetAsync("/payments/service-health");
 
             if (!response.IsSuccessStatusCode)
             {
                 var messageError = $"Erro ao verificar saúde do serviço de pagamento: {response.StatusCode}";
                 _logger.LogError(messageError);
-                throw new Exception(messageError);
+                
+                return new ServiceHealthResponse
+                {
+                    failing = true,
+                    minResponseTime = 0,
+                };
             }
 
             return await response.Content.ReadFromJsonAsync<ServiceHealthResponse>();
