@@ -23,17 +23,14 @@ namespace rinha_de_backend_2025_dotnet9.Services
             _scopeFactory = scopeFactory;
         }
 
-        
-
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
             _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
 
-            const int batchSize = 20;
-            const int maxConcurrency = 40;
+            const int batchSize = 10;
+            const int maxConcurrency = 8;
 
             var concurrencyLimiter = new SemaphoreSlim(maxConcurrency);
-            var tasks = new List<Task>();
 
             while (!stoppingToken.IsCancellationRequested)
             {
@@ -48,61 +45,45 @@ namespace rinha_de_backend_2025_dotnet9.Services
                     }
 
                     var validEntries = Array.FindAll(entries, p => !p.IsNullOrEmpty);
-                    if (validEntries.Length > 0)
+
+                    var tasks = validEntries.Select(async payload =>
                     {
-                        var failedPaymentsToRequeue = new List<RedisValue>();
+                        await concurrencyLimiter.WaitAsync(stoppingToken);
 
-                        foreach (var payload in validEntries)
+                        try
                         {
-                            await concurrencyLimiter.WaitAsync(stoppingToken);
+                            var payment = JsonSerializer.Deserialize<Payment>(payload);
+                            if (payment == null)
+                                return;
 
-                            var task = Task.Run(async () =>
-                            {
-                                try
-                                {
-                                    var payment = JsonSerializer.Deserialize<Payment>(payload);
-                                    if (payment == null)
-                                        return;
+                            bool useFallback = false;
+                            var useFallbackCache = await _redis.StringGetAsync("health:useFallback");
+                            if (useFallbackCache.HasValue)
+                                useFallback = (bool)useFallbackCache;
 
-                                    bool useFallback = false;
-                                    
-                                    var useFallbackCache = await _redis.StringGetAsync("health:useFallback");
-                                    if(useFallbackCache.HasValue)
-                                        useFallback = (bool)useFallbackCache;
-
-                                    var response = await ProcessPayment(payment, useFallback: useFallback);
-                                }
-                                catch (Exception ex)
-                                {
-                                    _logger.LogError(ex, $"Falha. adicionando na fila para reprocessar.");
-                                    failedPaymentsToRequeue.Add(payload);
-                                }
-                                finally
-                                {
-                                    concurrencyLimiter.Release();
-                                }
-                            }, stoppingToken);
-
-                            tasks.Add(task);
-
-                            if (failedPaymentsToRequeue.Count > 0)
-                            {
-                                await _redis.ListRightPushAsync("payments:queue", failedPaymentsToRequeue.ToArray());
-                            }
+                            var success = await ProcessPayment(payment, useFallback);
                         }
+                        catch (Exception ex)
+                        {
+                            _logger.LogError(ex, "Erro ao processar pagamento. Reenfileirando.");
+                            await _redis.ListRightPushAsync("payments:queue", payload);
+                        }
+                        finally
+                        {
+                            concurrencyLimiter.Release();
+                        }
+                    }).ToList();
 
-                        tasks.RemoveAll(t => t.IsCompleted);
-                    }
+                    await Task.WhenAll(tasks);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Erro no loop principal do worker.");
+                    await Task.Delay(100, stoppingToken);
                 }
             }
 
             _logger.LogInformation("Worker de pagamentos encerrado.");
-
-            await Task.WhenAll(tasks);
         }
 
         private async Task<string> ProcessPayment(Payment payment, bool useFallback)
