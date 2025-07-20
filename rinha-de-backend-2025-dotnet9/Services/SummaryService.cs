@@ -1,110 +1,85 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
+using rinha_de_backend_2025_dotnet9.Models.PaymentProcessor;
 using StackExchange.Redis;
+using System.Text.Json;
 
 namespace rinha_de_backend_2025_dotnet9.Services
 {
     public class SummaryService
     {
-        private readonly IDatabase _db;
+        private readonly IDatabase _redis;
+        private const string paymentsHashKey = "summary:payments";
 
         public SummaryService(IConnectionMultiplexer redis)
         {
-            _db = redis.GetDatabase();
+            _redis = redis.GetDatabase();
         }
 
-        public async Task IncrementSummaryAsync(string summaryType, decimal amount, DateTime processingDate, string correlationId)
+        public async Task IncrementSummaryAsync(string processorType, PaymentRequest paymentRequest)
         {
-            var timeKey = processingDate.ToUniversalTime().ToString("yyyy-MM-ddTHH:mm");
-            var redisKey = $"summary:{summaryType}:{timeKey}";
-            var indexKey = $"summary:{summaryType}:index";
-            var correlationSetKey = $"summary:{summaryType}:correlationIds";
-
-            bool alreadyProcessed = await _db.SetContainsAsync(correlationSetKey, correlationId);
-            if (alreadyProcessed)
+            var payment = new PaymentRedisEntry
             {
-                return;
-            }
+                CorrelationId = paymentRequest.correlationId,
+                Amount = paymentRequest.amount,
+                ProcessorType = processorType,
+                RequestedAt = paymentRequest.requestedAt.ToUniversalTime()
+            };
 
-            long amountInCents = (long)Math.Round(amount * 100, 2);
-
-            var tran = _db.CreateTransaction();
-            _ = tran.HashIncrementAsync(redisKey, "totalRequests", 1);
-            _ = tran.HashIncrementAsync(redisKey, "totalAmount", amountInCents);
-            _ = tran.SetAddAsync(indexKey, timeKey);
-            _ = tran.SetAddAsync(correlationSetKey, correlationId);
-            await tran.ExecuteAsync();
+            var json = JsonSerializer.Serialize(payment);
+            await _redis.HashSetAsync(paymentsHashKey, payment.CorrelationId, json);
         }
 
         public async Task<PaymentSummary> GetFullSummaryAsync(DateTime? from, DateTime? to)
         {
-            long defaultRequests = 0, defaultAmount = 0;
-            long fallbackRequests = 0, fallbackAmount = 0;
+            var entries = await _redis.HashGetAllAsync(paymentsHashKey);
+            var payments = new List<PaymentRedisEntry>();
 
-            // Define valores padrão caso não receba parâmetros
-            from = from ?? DateTime.MinValue;
-            to = to ?? DateTime.MaxValue;
-
-            // Evita null
-            if (!from.HasValue || !to.HasValue)
-                return new PaymentSummary();
-
-            // Pega os índices salvos no Redis
-            var defaultIndex = await _db.SetMembersAsync("summary:default:index");
-            var fallbackIndex = await _db.SetMembersAsync("summary:fallback:index");
-
-            // Filtra apenas os timestamps dentro do intervalo
-            var filteredDefault = defaultIndex
-                .Select(x => x.ToString())
-                .Where(x =>
-                    DateTime.TryParseExact(x, "yyyy-MM-ddTHH:mm", null, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt) &&
-                    dt >= from.Value.ToUniversalTime() && dt <= to.Value.ToUniversalTime())
-                .ToList();
-
-            var filteredFallback = fallbackIndex
-                .Select(x => x.ToString())
-                .Where(x =>
-                    DateTime.TryParseExact(x, "yyyy-MM-ddTHH:mm", null, System.Globalization.DateTimeStyles.AssumeUniversal, out var dt) &&
-                    dt >= from.Value.ToUniversalTime() && dt <= to.Value.ToUniversalTime())
-                .ToList();
-
-            // Faz leitura paralela
-            var defaultTasks = filteredDefault.Select(key => _db.HashGetAllAsync($"summary:default:{key}")).ToList();
-            var fallbackTasks = filteredFallback.Select(key => _db.HashGetAllAsync($"summary:fallback:{key}")).ToList();
-
-            var defaultResults = await Task.WhenAll(defaultTasks);
-            var fallbackResults = await Task.WhenAll(fallbackTasks);
-
-            foreach (var entries in defaultResults)
+            foreach (var entry in entries)
             {
-                foreach (var entry in entries)
+                try
                 {
-                    if (entry.Name == "totalRequests") defaultRequests += (long)entry.Value;
-                    else if (entry.Name == "totalAmount") defaultAmount += (long)entry.Value;
+                    var paymentData = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(entry.Value);
+
+                    var payment = new PaymentRedisEntry
+                    {
+                        CorrelationId = paymentData["CorrelationId"].GetString(),
+                        Amount = paymentData["Amount"].GetDecimal(),
+                        ProcessorType = paymentData["ProcessorType"].GetString(),
+                        RequestedAt = paymentData["RequestedAt"].GetDateTime().ToUniversalTime()
+                    };
+
+                    payments.Add(payment);
+                }
+                catch
+                {
                 }
             }
 
-            foreach (var entries in fallbackResults)
-            {
-                foreach (var entry in entries)
-                {
-                    if (entry.Name == "totalRequests") fallbackRequests += (long)entry.Value;
-                    else if (entry.Name == "totalAmount") fallbackAmount += (long)entry.Value;
-                }
-            }
+            var paymentsFiltreds = payments.Where(p => p.RequestedAt >= (from ?? DateTime.MinValue).ToUniversalTime() &&
+                                                        p.RequestedAt <= (to ?? DateTime.MaxValue).ToUniversalTime()).ToList();
 
             return new PaymentSummary
             {
                 _default = new Models.Shared.Summary
                 {
-                    totalRequests = defaultRequests,
-                    totalAmount = Math.Round(defaultAmount / 100m, 2)
+                    totalRequests = paymentsFiltreds.Count(p => p.ProcessorType == "default"),
+                    totalAmount = paymentsFiltreds.Where(p => p.ProcessorType == "default").Sum(p => p.Amount)
                 },
+
                 fallback = new Models.Shared.Summary
                 {
-                    totalRequests = fallbackRequests,
-                    totalAmount = Math.Round(fallbackAmount / 100m, 2)
+                    totalRequests = paymentsFiltreds.Count(p => p.ProcessorType == "fallback"),
+                    totalAmount = paymentsFiltreds.Where(p => p.ProcessorType == "fallback").Sum(p => p.Amount)
                 }
             };
         }
+    }
+
+    public class PaymentRedisEntry
+    {
+        public string CorrelationId { get; set; }
+        public decimal Amount { get; set; }
+        public string ProcessorType { get; set; }
+        public DateTime RequestedAt { get; set; }
     }
 }

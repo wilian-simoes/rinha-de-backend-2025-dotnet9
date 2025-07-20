@@ -1,4 +1,5 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
+using rinha_de_backend_2025_dotnet9.Models.PaymentProcessor;
 using StackExchange.Redis;
 using System.Text.Json;
 
@@ -101,7 +102,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
             var response = await processor.PostPaymentsAsync(request, useFallback);
 
-            await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request.amount, request.requestedAt, request.correlationId);
+            await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request);
 
             return response;
         }
