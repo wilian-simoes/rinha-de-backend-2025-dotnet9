@@ -20,9 +20,7 @@ services:
           memory: "40MB"
 
   api1: &api
-    build:
-      context: .
-    # image: luizcordista/rinha-backend-2025:tag ------------------------------------------ <<<<< trocar para minha imagem no dockerhub
+    image: wiliansa/rinha-backend-2025:v1
     restart: unless-stopped
     hostname: api1
     environment:
