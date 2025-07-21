@@ -6,13 +6,11 @@ namespace rinha_de_backend_2025_dotnet9.Services
     {
         private readonly IHttpClientFactory _httpClientFactory;
         private readonly ILogger<PaymentProcessorService> _logger;
-        private readonly SummaryService _summaryService;
 
-        public PaymentProcessorService(IHttpClientFactory httpClientFactory, ILogger<PaymentProcessorService> logger, SummaryService summaryService)
+        public PaymentProcessorService(IHttpClientFactory httpClientFactory, ILogger<PaymentProcessorService> logger)
         {
             _httpClientFactory = httpClientFactory;
             _logger = logger;
-            _summaryService = summaryService;
         }
 
         private HttpClient GetClient(bool useFallback)

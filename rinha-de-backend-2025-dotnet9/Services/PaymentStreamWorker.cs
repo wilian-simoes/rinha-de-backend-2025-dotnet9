@@ -1,5 +1,4 @@
 ﻿using rinha_de_backend_2025_dotnet9.Models;
-using rinha_de_backend_2025_dotnet9.Models.PaymentProcessor;
 using StackExchange.Redis;
 using System.Text.Json;
 
