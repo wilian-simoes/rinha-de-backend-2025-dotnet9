@@ -25,7 +25,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            const int batchSize = 10;
+            const int batchSize = 14;
             const int maxConcurrency = 6;
 
             var concurrencyLimiter = new SemaphoreSlim(maxConcurrency);
