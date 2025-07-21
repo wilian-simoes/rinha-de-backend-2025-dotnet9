@@ -12,16 +12,16 @@ Este repositório contém a minha participação na **Rinha de Backend 2025**, i
 
 ## Como rodar ##
 
-- 1. Clone o repositório oficial da rinha-backend-2025: https://github.com/zanfranceschi/rinha-de-backend-2025
-- 2. Dentro da pasta "payment-processor" rode:
+- Clone o repositório oficial da rinha-backend-2025: https://github.com/zanfranceschi/rinha-de-backend-2025
+- Dentro da pasta "payment-processor" rode:
     ```sh
     "docker-compose up --build"
     ```
-- 3. Na pasta raiz do projeto em .NET /rinha-de-backend-2025-dotnet9 rode:
+- Na pasta raiz do projeto em .NET /rinha-de-backend-2025-dotnet9 rode:
     ```sh
     "docker-compose up --build"
     ```
-- 4. Após isso as aplicações estão prontas para realizações dos testes com o k6.
+- Após isso as aplicações estão prontas para realizações dos testes com o k6.
 
 ## Sobre a solução ##
 
