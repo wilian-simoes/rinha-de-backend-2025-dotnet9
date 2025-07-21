@@ -49,8 +49,8 @@ app.UseHttpsRedirection();
 
 app.MapPost("/payments", async (Payment payment, PaymentService paymentService) =>
 {
-    var result = await paymentService.RegisterPayment(payment);
-    return Results.Ok(result);
+    await paymentService.RegisterPayment(payment);
+    return Results.Ok();
 })
 .WithName("payments");
 

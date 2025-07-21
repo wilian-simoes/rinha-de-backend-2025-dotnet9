@@ -23,23 +23,17 @@ namespace rinha_de_backend_2025_dotnet9.Services
             return summary;
         }
 
-        public async Task<string> RegisterPayment(Payment payment)
+        public async Task RegisterPayment(Payment payment)
         {
             try
             {
                 var json = JsonSerializer.Serialize(payment);
-
                 await _redis.ListRightPushAsync("payments:queue", json, flags: CommandFlags.FireAndForget);
-
-                var message = $"Pagamento {payment.correlationId} adicionado na fila.";
-                _logger.LogInformation(message);
-                return message;
             }
             catch (Exception ex)
             {
                 var messageError = $"Erro ao adicionar pagamento {payment.correlationId} na fila: {ex.Message}";
                 _logger.LogError(messageError);
-                return messageError;
             }
         }
     }

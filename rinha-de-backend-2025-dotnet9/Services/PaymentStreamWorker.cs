@@ -25,8 +25,6 @@ namespace rinha_de_backend_2025_dotnet9.Services
 
         protected override async Task ExecuteAsync(CancellationToken stoppingToken)
         {
-            _logger.LogInformation("Worker de pagamentos (Redis Stream) iniciado.");
-
             const int batchSize = 10;
             const int maxConcurrency = 6;
 
@@ -61,7 +59,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
                             if (useFallbackCache.HasValue)
                                 useFallback = (bool)useFallbackCache;
 
-                            var success = await ProcessPayment(payment, useFallback);
+                            await ProcessPayment(payment, useFallback);
                         }
                         catch (Exception ex)
                         {
@@ -86,7 +84,7 @@ namespace rinha_de_backend_2025_dotnet9.Services
             _logger.LogInformation("Worker de pagamentos encerrado.");
         }
 
-        private async Task<string> ProcessPayment(Payment payment, bool useFallback)
+        private async Task ProcessPayment(Payment payment, bool useFallback)
         {
             using var scope = _scopeFactory.CreateScope();
             var processor = scope.ServiceProvider.GetRequiredService<PaymentProcessorService>();
@@ -99,11 +97,9 @@ namespace rinha_de_backend_2025_dotnet9.Services
                 requestedAt = now,
             };
 
-            var response = await processor.PostPaymentsAsync(request, useFallback);
+            await processor.PostPaymentsAsync(request, useFallback);
 
             await _summaryService.IncrementSummaryAsync(useFallback == false ? "default" : "fallback", request);
-
-            return response;
         }
     }
 }
